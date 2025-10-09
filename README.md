@@ -6,11 +6,9 @@
 This repo contains code for the following paper:
 
 **Conformal Risk Training: End-to-End Optimization of Conformal Risk Control**
-<br>C. Yeh*, N. Christianson*, A. Wierman, Y. Yue
+<br>C. Yeh, N. Christianson, A. Wierman, Y. Yue
 <br>NeurIPS 2025
 <br>[**Paper**](INSERT ARXIV LINK)
-
-\* denotes equal contribution
 
 
 ## Table of Contents
