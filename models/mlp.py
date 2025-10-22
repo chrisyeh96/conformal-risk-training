@@ -72,9 +72,11 @@ def run_epoch_mlp(
         device: either 'cpu' or 'cuda'
 
     Returns:
-        result: dict, maps each key to an array of shape [num_examples, ...]
+        result_np: dict, maps each key to an array of shape [num_examples, ...]
             - 'loss': loss for each example, always present
+            - 'pred': predictions for each example, always present
             - 'task_loss': task loss for each example. Present if `prob` is not None
+            - 'financial_loss': financial loss for each example. Present if `prob` is not None
             - <primal var name>: decision variable for each example. Present if `prob`
                 is not None and `return_z` is True
     """
@@ -85,9 +87,8 @@ def run_epoch_mlp(
 
     loss_fn = nn.MSELoss(reduction='none')
     losses = []
-    task_losses: list[float] = []
-    financial_losses: list[float] = []
-    zs: defaultdict[str, list[np.ndarray]] = defaultdict(list)
+    preds = []
+    result = defaultdict(list)
 
     for x, y in loader:
         x = x.to(device, non_blocking=True)
@@ -97,6 +98,9 @@ def run_epoch_mlp(
 
         pred = model(x)
         loss = loss_fn(pred, y)
+
+        pred_np_batch = pred.detach().cpu().numpy()
+        preds.append(pred_np_batch)
         losses.append(loss.detach().cpu().numpy())
 
         if optimizer is not None:
@@ -107,26 +111,25 @@ def run_epoch_mlp(
         # calculate task loss if `prob` is given
         if prob is not None:
             with torch.no_grad():
-                pred_np_batch = pred.cpu().numpy()
                 for y_np, pred_np in zip(y_np_batch, pred_np_batch):
                     prob.solve(pred_np)
                     if return_z:
                         for k, v in prob.primal_vars.items():
                             assert v.value is not None
-                            zs[k].append(v.value)
-                    task_loss = prob.task_loss_np(y_np, is_standardized=True, scale=λ)
-                    financial_loss = prob.financial_loss_np(y_np, is_standardized=True, scale=λ)
-                    task_losses.append(task_loss)
-                    financial_losses.append(financial_loss)
+                            result[k].append(v.value)
+                    result['task_loss'].append(
+                        prob.task_loss_np(y_np, is_standardized=True, scale=λ))
+                    result['financial_loss'].append(
+                        prob.financial_loss_np(y_np, is_standardized=True, scale=λ))
 
-    result = {'loss': np.concatenate(losses)}
+    result_np = {
+        'loss': np.concatenate(losses),
+        'pred': np.concatenate(preds)
+    }
     if prob is not None:
-        result['task_loss'] = np.array(task_losses)
-        result['financial_loss'] = np.array(financial_losses)
-        if return_z:
-            for k, v in zs.items():
-                result[k] = np.stack(v)
-    return result
+        for k, v in result.items():
+            result_np[k] = np.stack(v)
+    return result_np
 
 
 def train_mlp(

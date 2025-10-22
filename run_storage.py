@@ -52,8 +52,16 @@ def get_optimal_task_losses(
     shuffle: bool, label_noise: float, split: str, const: StorageConstants
 ) -> dict[str, np.ndarray]:
     """
-    Returns a dict with keys:
-        task_loss, z_in, z_out, z_net
+    Args:
+        shuffle: whether to shuffle dataset before splitting into train/calib/test
+        label_noise: stddev of Gaussian noise added to the labels
+        split: 'train', 'calib', or 'test'
+        const: StorageConstants object
+
+    Returns:
+        a dict with keys
+            task_loss: shape [N]
+            z_in, z_out, z_net: shape [N, T]
     """
     tensors, y_info = get_tensors(
         shuffle=shuffle, log_prices=LOG_PRICES, label_noise=label_noise)
@@ -63,16 +71,14 @@ def get_optimal_task_losses(
     prob = StorageProblemNonRobust(T=24, y_mean=y_mean, y_std=y_std, const=const)
 
     result = defaultdict(list)
-    task_losses = []
     for y in tensors[f'Y_{split}'].numpy():  # type: ignore
         task_loss = prob.solve(y).value
-        task_losses.append(task_loss)
+        result['task_loss'].append(task_loss)
         for k, v in prob.primal_vars.items():
             assert isinstance(v.value, np.ndarray)
             result[k].append(v.value)
 
-    result = {k: np.concatenate(v) for k, v in result.items()}
-    result['task_loss'] = np.array(task_losses)
+    result = {k: np.stack(v) for k, v in result.items()}
     return result
 
 
@@ -328,6 +334,31 @@ def e2ecrc(
     """
     Conformal Risk Training
 
+    Saves the following outputs to {savedir}/a{alpha}_delta{delta}_lr{lr}_s{seed}.*:
+        - .pt: trained model checkpoint
+        - .json: results dict with keys
+            seed: seed
+            alpha: risk threshold
+            delta: quantile level
+            lr: learning rate
+            max_epochs: number of epochs trained for
+            train_task_losses: list of avg task loss on train set per epoch
+            train_lams: list of avg λ per epoch
+            val_task_losses: list of avg task loss on val set per epoch
+            val_lams: list of val λ per epoch
+            best_epoch: epoch with lowest val task loss
+            val_task_loss: lowest task loss on val set
+            val_lam: λ corresponding to lowest task loss on val set
+            test_mse: MSE on test set
+            test_task_loss: avg task loss on test set
+            test_cvar: CVaR^δ[financial loss] on test set
+        - .npz: dict of arrays with keys
+            pred: shape [N, T], predicted prices on test set, in standardized units
+            z_in, z_out, z_net: shape [N, T], decisions on test set, not yet adjusted by λ
+            loss: shape [N], squared error
+            task_loss: shape [N], task loss
+            financial_loss: shape [N], financial loss
+
     Args:
         shuffle: whether to shuffle dataset before splitting into train/calib/test
         future_temp: whether to include future temperature features
@@ -346,6 +377,10 @@ def e2ecrc(
         batch_size: batch size for training
         num_cal: number of calibration samples to use
         savedir: where to save the results
+
+    Returns:
+        result: dict of performance metrics, see .json file description above
+        msg: summary string
     """
     assert mse_loss_frac < 1, 'mse_loss_frac must be strictly < 1'
     MSELoss = torch.nn.MSELoss(reduction='mean')
@@ -404,9 +439,9 @@ def e2ecrc(
         'val_lam': np.inf,  # lambda corresponding to lowest task loss on val set
 
         # these results get filled in later:
+        # 'test_mse'
         # 'test_task_loss'
         # 'test_cvar'
-        # 'test_mse'
     }
     steps_since_decrease = 0
     buffer = io.BytesIO()
@@ -503,7 +538,7 @@ def e2ecrc(
     with torch.no_grad():
         test_result = run_epoch_mlp(
             model, loaders['test'], prob=prob_z, λ=result['val_lam'],
-            return_z=False, device=device)
+            return_z=True, device=device)
         result['test_mse'] = test_result['loss'].mean().item()
         result['test_task_loss'] = test_result['task_loss'].mean().item()
         result['test_cvar'] = cvar(test_result['financial_loss'], q=delta)
@@ -515,6 +550,10 @@ def e2ecrc(
     # save results
     basename = f'a{alpha:.2f}_delta{delta:.2f}_lr{lr:.2g}_s{seed}'
     os.makedirs(savedir, exist_ok=True)
+
+    npz_path = os.path.join(savedir, f'{basename}.npz')
+    np.savez_compressed(npz_path, allow_pickle=False, **test_result)
+
     with open(os.path.join(savedir, f'{basename}.json'), 'w') as f:
         json.dump(result, f, indent=2)
 
@@ -802,7 +841,7 @@ def main(args: argparse.Namespace) -> None:
                     seed=s, shuffle=shuffle, future_temp=args.future_temp,
                     label_noise=LABEL_NOISE, const=STORAGE_CONSTS[0],
                     alphas=alphas, deltas=deltas,
-                    saved_ckpt_fmt=saved_ckpt_fmt, device=device)
+                    saved_ckpt_fmt=saved_ckpt_fmt, device=device, savedir=out_dir)
                 all_rows.extend(crc_results)
             # save results to file
             df = pd.DataFrame(all_rows)
