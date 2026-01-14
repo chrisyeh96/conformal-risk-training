@@ -110,6 +110,14 @@ We recommend using the [conda](https://docs.conda.io/) package manager.
    python run_storage.py e2ecrc --shuffle --alpha 2 5 10 --delta 0.9 0.95 0.99 --lr 1e-2 1e-3 1e-4 1e-5 --device cuda
    ```
 
+   If you wish to reproduce the figures without running the experiments, run the following commands to download the precomputed results. These commands will create a folder `out/storage_mlp_shuffle/`, download the `storage_mlp_shuffle.zip` file from [here](https://github.com/chrisyeh96/conformal-risk-training/releases/download/v1.0.0/storage_mlp_shuffle.zip), and unzip its contents to `out/storage_mlp_shuffle/`.
+
+   ```bash
+   mkdir -p out/storage_mlp_shuffle/
+   curl -LO "https://github.com/chrisyeh96/conformal-risk-training/releases/download/v1.0.0/storage_mlp_shuffle.zip"
+   unzip storage_mlp_shuffle.zip -d out/storage_mlp_shuffle/
+   ```
+
 3. To generate most figures, run the [`analysis/storage.ipynb`](analysis/storage.ipynb) notebook. For the $t$-hyperparameter sensitivity tables, see [`analysis/storage_vary_t.ipynb`](analysis/storage_vary_t.ipynb). For the plot on varying the size of the calibration set, see [`analysis/storage_vary_calibsize.ipynb`](analysis/storage_vary_calibsize.ipynb).
 
 
